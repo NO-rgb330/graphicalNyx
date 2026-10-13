@@ -1,0 +1,43 @@
+def main(app):
+    app.title("Calculator")
+    app.size(320, 440)
+
+    state = {"expr": ""}
+    display = app.label("0", align="right", size="huge")
+
+    def refresh():
+        display.text = state["expr"] or "0"
+
+    def press(k):
+        if k == "=":
+            try:
+                result = eval(state["expr"] or "0", {"__builtins__": {}}, {})
+                state["expr"] = str(result)
+            except Exception:
+                state["expr"] = "error"
+        elif k == "C":
+            state["expr"] = ""
+        elif k == "DEL":
+            state["expr"] = state["expr"][:-1]
+        else:
+            if state["expr"] == "error":
+                state["expr"] = ""
+            state["expr"] += k
+        refresh()
+
+    layout = [
+        ["C", "DEL", "%", "/"],
+        ["7", "8", "9", "*"],
+        ["4", "5", "6", "-"],
+        ["1", "2", "3", "+"],
+        ["(", ")", ".", "="],
+    ]
+
+    for row_keys in layout:
+        r = app.row()
+        for k in row_keys:
+            cls = "nx-calc" + (" nx-eq" if k == "=" else "")
+            r.button(k, (lambda key=k: press(key)), cls=cls)
+
+
+nyx.run(main)

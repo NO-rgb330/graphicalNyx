@@ -1,0 +1,237 @@
+def main(app):
+    app.title("Terminal")
+    app.size(720, 460)
+
+    term = app.terminal(prompt="user@nyx:~$")
+    state = {"cwd": nyx.home()}
+
+    term.print("NyxOS terminal - a Python shell inside your browser.", "dim")
+    term.print("type 'help' for commands.", "dim")
+    term.print("")
+
+    def home_display(p):
+        h = nyx.home()
+        if p == h:
+            return "~"
+        if p.startswith(h + "/"):
+            return "~" + p[len(h):]
+        return p
+
+    def update_prompt():
+        term.set_prompt("user@nyx:" + home_display(state["cwd"]) + "$")
+
+    def resolve(p):
+        if not p:
+            return state["cwd"]
+        parts = [] if p.startswith("/") else state["cwd"].split("/")[1:]
+        for seg in p.split("/"):
+            if seg in ("", "."):
+                continue
+            if seg == "..":
+                if parts:
+                    parts.pop()
+            else:
+                parts.append(seg)
+        return "/" + "/".join(parts)
+
+    def show_ls(args):
+        target = resolve(args[0] if args else "")
+        if not nyx.exists(target):
+            term.print("ls: no such path", "err")
+            return
+        if not nyx.is_dir(target):
+            term.print(target.split("/")[-1])
+            return
+        names = nyx.list(target)
+        if not names:
+            term.print("(empty)", "dim")
+            return
+        term.print("  ".join(sorted(names)))
+
+    def show_cat(args):
+        if not args:
+            term.print("cat: missing operand", "err")
+            return
+        p = resolve(args[0])
+        if not nyx.exists(p):
+            term.print("cat: no such file", "err")
+            return
+        if nyx.is_dir(p):
+            term.print("cat: is a directory", "err")
+            return
+        for line in (nyx.read(p) or "").split("\n"):
+            term.print(line)
+
+    def show_help():
+        term.print("nyx shell - commands:", "bright")
+        cmds = [
+            ("help", "show this list"),
+            ("ls [path]", "list directory"),
+            ("cd <path>", "change directory"),
+            ("pwd", "print working directory"),
+            ("cat <file>", "print file contents"),
+            ("mkdir <name>", "create directory"),
+            ("touch <name>", "create empty file"),
+            ("rm <name>", "remove a file"),
+            ("edit <file>", "open file in editor"),
+            ("open <app>", "launch a built-in app"),
+            ("run <app-or-file>", "launch an app or a user .nyx file"),
+            ("apps", "list installed apps"),
+            ("date", "current date and time"),
+            ("whoami", "print current user"),
+            ("echo <text>", "print text"),
+            ("clear", "clear the screen"),
+            ("exit", "close this terminal"),
+            ("", ""),
+            ("resetbootall", "FACTORY RESET - wipe all users, files, settings"),
+        ]
+        for name, desc in cmds:
+            if not name:
+                term.print("")
+                continue
+            term.print("  " + name.ljust(18) + desc)
+
+    def show_apps():
+        term.print("installed apps:", "bright")
+        for a in nyx.list_apps():
+            term.print("  " + a)
+
+    def run_target(target):
+        """Launch a built-in app or a user-made .nyx file.
+
+        Strategy:
+          1. If the token is a registered app id, launch that app.
+          2. Otherwise, resolve it as a file path and try to run it
+             as a Python .nyx application window.
+          3. Otherwise, print a clear error.
+        """
+        if not target:
+            term.print("run: missing operand", "err")
+            term.print("usage: run <app-id> | run <path/to/file.nyx>", "dim")
+            return
+
+        # --- try as a built-in app id first (only if it looks like one) ---
+        if "/" not in target and not target.endswith(".nyx"):
+            if _bridge.hasApp(target):
+                term.print("launching app: " + target, "dim")
+                nyx.open_app(target)
+                return
+
+        # --- otherwise treat as a file path ---
+        p = resolve(target)
+        if not nyx.exists(p):
+            # One more fallback: maybe they meant an app but typed a path-like token
+            if _bridge.hasApp(target):
+                term.print("launching app: " + target, "dim")
+                nyx.open_app(target)
+                return
+            term.print("run: no such app or file: " + target, "err")
+            return
+
+        if nyx.is_dir(p):
+            term.print("run: is a directory: " + target, "err")
+            return
+
+        # Only allow .nyx files - anything else is refused with a hint
+        base = p.split("/")[-1]
+        if not base.lower().endswith(".nyx"):
+            term.print("run: not a .nyx file: " + base, "err")
+            term.print("  (use 'edit' to open text files)", "dim")
+            return
+
+        term.print("launching: " + p, "dim")
+        ok = _bridge.runNyxFile(p)
+        if not ok:
+            term.print("run: failed to launch " + p, "err")
+
+    def on_cmd(cmd):
+        cmd = cmd.strip()
+        if not cmd:
+            return
+        parts = cmd.split()
+        name = parts[0]
+        args = parts[1:]
+
+        if name.lower() == "resetbootall":
+            term.print("")
+            term.print("!!! FACTORY RESET !!!", "err")
+            term.print("all users, files, and settings will be permanently wiped.", "err")
+            term.print("the page will reload in a moment.", "err")
+            term.print("")
+            nyx.reset_boot_all()
+            return
+
+        if name == "help":
+            show_help()
+        elif name == "ls":
+            show_ls(args)
+        elif name == "cd":
+            target = resolve(args[0] if args else "~")
+            if args and args[0] == "~":
+                target = nyx.home()
+            if not nyx.exists(target):
+                term.print("cd: no such directory", "err")
+            elif not nyx.is_dir(target):
+                term.print("cd: not a directory", "err")
+            else:
+                state["cwd"] = target
+                update_prompt()
+        elif name == "pwd":
+            term.print(state["cwd"])
+        elif name == "cat":
+            show_cat(args)
+        elif name == "mkdir":
+            if not args:
+                term.print("mkdir: missing operand", "err")
+            else:
+                if not nyx.mkdir(resolve(args[0])):
+                    term.print("mkdir: cannot create", "err")
+        elif name == "touch":
+            if not args:
+                term.print("touch: missing operand", "err")
+            else:
+                nyx.write(resolve(args[0]), "")
+        elif name == "rm":
+            if not args:
+                term.print("rm: missing operand", "err")
+            else:
+                if not nyx.remove(resolve(args[0])):
+                    term.print("rm: cannot remove", "err")
+        elif name == "edit":
+            if not args:
+                term.print("edit: usage: edit <file>", "err")
+            else:
+                nyx.open_app("editor", resolve(args[0]))
+        elif name == "open":
+            if not args:
+                term.print("open: usage: open <app>", "err")
+            else:
+                if _bridge.hasApp(args[0]):
+                    nyx.open_app(args[0])
+                else:
+                    term.print("open: unknown app: " + args[0], "err")
+                    term.print("  try 'apps' to see available apps", "dim")
+        elif name == "run":
+            run_target(args[0] if args else "")
+        elif name == "apps":
+            show_apps()
+        elif name == "date":
+            import datetime
+            term.print(str(datetime.datetime.now()))
+        elif name == "whoami":
+            term.print(nyx.user())
+        elif name == "echo":
+            term.print(" ".join(args))
+        elif name == "clear":
+            term.clear()
+        elif name == "exit":
+            app.close()
+        else:
+            term.print("nyx: command not found: " + name, "err")
+
+    term.on_command(on_cmd)
+    update_prompt()
+    term.focus()
+
+
+nyx.run(main)

@@ -1,0 +1,63 @@
+import calendar as _cal
+import datetime
+
+
+def main(app):
+    app.title("Calendar")
+    app.size(420, 460)
+
+    today = datetime.date.today()
+    state = {"y": today.year, "m": today.month}
+
+    # ---- callbacks defined first ----
+    def render():
+        y, m = state["y"], state["m"]
+        header.text = _cal.month_name[m] + " " + str(y)
+        sub.text = "week starts on Monday"
+        grid.clear()
+        for d in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]:
+            grid.label(d, align="center", cls="nx-bold nx-dim")
+        for week in _cal.monthcalendar(y, m):
+            for day in week:
+                if day == 0:
+                    grid.label("", align="center")
+                else:
+                    is_today = (y == today.year
+                                and m == today.month
+                                and day == today.day)
+                    cls = "nx-bold" if is_today else ""
+                    grid.label(str(day), align="center", cls=cls)
+
+    def shift(delta):
+        m = state["m"] + delta
+        y = state["y"]
+        while m < 1:
+            m += 12
+            y -= 1
+        while m > 12:
+            m -= 12
+            y += 1
+        state["m"] = m
+        state["y"] = y
+        render()
+
+    def go_today():
+        state["y"] = today.year
+        state["m"] = today.month
+        render()
+
+    # ---- build UI ----
+    header = app.label("", align="center", size="lg")
+    sub = app.label("", align="center", cls="nx-dim")
+
+    nav = app.row()
+    nav.button("prev", lambda: shift(-1))
+    nav.button("today", go_today)
+    nav.button("next", lambda: shift(1))
+
+    grid = app.grid(cols=7, cls="nx-grid")
+
+    render()
+
+
+nyx.run(main)

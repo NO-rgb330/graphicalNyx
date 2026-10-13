@@ -1,0 +1,321 @@
+import js
+from pyodide.ffi import create_proxy, to_js
+
+_bridge = js.window.__nyxjs
+
+# Keep every proxy alive for the lifetime of the page so JS event
+# listeners never lose their Python callbacks to garbage collection.
+_nyx_proxies = []
+
+
+def _keep_proxy(p):
+    _nyx_proxies.append(p)
+    return p
+
+
+def _mkprops(**kw):
+    """Convert keyword args into a plain JavaScript object."""
+    return to_js(kw, dict_converter=js.Object.fromEntries)
+
+
+class Widget:
+    def __init__(self, eid):
+        object.__setattr__(self, "_id", eid)
+
+    @property
+    def text(self):
+        return _bridge.getProp(self._id, "text")
+
+    @text.setter
+    def text(self, v):
+        _bridge.setProp(self._id, "text", str(v))
+
+    @property
+    def value(self):
+        return _bridge.getProp(self._id, "value")
+
+    @value.setter
+    def value(self, v):
+        _bridge.setProp(self._id, "value", str(v))
+
+    def on_click(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda: fn()))
+        _bridge.onClick(self._id, proxy)
+        return self
+
+    def on_input(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda v: fn(v)))
+        _bridge.onInput(self._id, proxy)
+        return self
+
+    def on_enter(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda v: fn(v)))
+        _bridge.onEnter(self._id, proxy)
+        return self
+
+    def on_change(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda v: fn(v)))
+        _bridge.onChange(self._id, proxy)
+        return self
+
+    def wall_set_on(self, on):
+        _bridge.wallSetOn(self._id, bool(on))
+        return self
+
+    def wall_on_click(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda: fn()))
+        _bridge.wallOnClick(self._id, proxy)
+        return self
+
+    def switch_set(self, on):
+        _bridge.switchSet(self._id, bool(on))
+        return self
+
+    def focus(self):
+        _bridge.focus(self._id)
+
+    def remove(self):
+        _bridge.remove(self._id)
+
+    def add_class(self, cls):
+        _bridge.addClass(self._id, cls)
+        return self
+
+    def set_style(self, prop, value):
+        _bridge.setStyle(self._id, prop, value)
+        return self
+
+
+class Container(Widget):
+    def label(self, text="", align="", size="", cls=""):
+        return Widget(_bridge.addElement(
+            self._id, "label",
+            _mkprops(text=text, align=align, size=size, cls=cls)))
+
+    def button(self, text, on_click=None, cls=""):
+        w = Widget(_bridge.addElement(
+            self._id, "button", _mkprops(text=text, cls=cls)))
+        if on_click is not None:
+            w.on_click(on_click)
+        return w
+
+    def input(self, placeholder="", value="", on_enter=None, on_input=None):
+        w = Widget(_bridge.addElement(
+            self._id, "input", _mkprops(placeholder=placeholder, value=value)))
+        if on_enter is not None:
+            w.on_enter(on_enter)
+        if on_input is not None:
+            w.on_input(on_input)
+        return w
+
+    def textarea(self, value=""):
+        return Widget(_bridge.addElement(
+            self._id, "textarea", _mkprops(value=value)))
+
+    def select(self, options, value="", on_change=None):
+        w = Widget(_bridge.addElement(
+            self._id, "select", _mkprops(options=list(options), value=value)))
+        if on_change is not None:
+            w.on_change(on_change)
+        return w
+
+    def row(self, cls=""):
+        return Container(_bridge.addElement(
+            self._id, "row", _mkprops(cls=cls)))
+
+    def grid(self, cols=4, cls=""):
+        return Container(_bridge.addElement(
+            self._id, "grid", _mkprops(cols=cols, cls=cls)))
+
+    def spacer(self, h=8):
+        return Widget(_bridge.addElement(
+            self._id, "spacer", _mkprops(h=h)))
+
+    def terminal(self, prompt=">"):
+        return Terminal(_bridge.addElement(
+            self._id, "terminal", _mkprops(prompt=prompt)))
+
+    def card(self, text=""):
+        return Widget(_bridge.addElement(
+            self._id, "card", _mkprops(text=text)))
+
+    def wall(self, css="", on=False):
+        return Widget(_bridge.addElement(
+            self._id, "wall", _mkprops(css=css, on=on)))
+
+    def switch(self, on=False):
+        return Widget(_bridge.addElement(
+            self._id, "switch", _mkprops(on=on)))
+
+    def clear(self):
+        _bridge.clearChildren(self._id)
+
+
+class Terminal(Widget):
+    def print(self, text="", cls=""):
+        _bridge.termPrint(self._id, str(text), cls)
+
+    def clear(self):
+        _bridge.termClear(self._id)
+
+    def set_prompt(self, p):
+        _bridge.termSetPrompt(self._id, p)
+
+    def on_command(self, fn):
+        proxy = _keep_proxy(create_proxy(lambda c: fn(c)))
+        _bridge.termOnCommand(self._id, proxy)
+        return self
+
+    def focus(self):
+        _bridge.termFocus(self._id)
+
+
+class App(Container):
+    def __init__(self, wid):
+        object.__setattr__(self, "_id", wid)
+
+    def title(self, t):
+        _bridge.setTitle(self._id, str(t))
+
+    def size(self, w, h):
+        _bridge.setSize(self._id, int(w), int(h))
+
+    def close(self):
+        _bridge.closeWin(self._id)
+
+
+class _Nyx:
+    def run(self, main_fn):
+        """Call the app's main function, passing opts if it accepts them."""
+        wid = _bridge.currentWindow()
+        app = App(wid)
+        opts = self._current_opts()
+        # Decide whether to pass opts based on the function's arg count.
+        try:
+            argc = main_fn.__code__.co_argcount
+        except AttributeError:
+            argc = 1
+        if argc >= 2:
+            main_fn(app, opts)
+        else:
+            main_fn(app)
+
+    def _current_opts(self):
+        import json
+        try:
+            return json.loads(_bridge.getCurrentOpts())
+        except Exception:
+            return {}
+
+    # filesystem
+    def read(self, path):
+        return _bridge.fsRead(path)
+
+    def write(self, path, content):
+        return bool(_bridge.fsWrite(path, str(content)))
+
+    def list(self, path="/"):
+        import json
+        return json.loads(_bridge.fsList(path))
+
+    def exists(self, path):
+        return bool(_bridge.fsExists(path))
+
+    def is_dir(self, path):
+        return bool(_bridge.fsIsDir(path))
+
+    def mkdir(self, path):
+        return bool(_bridge.fsMkdir(path))
+
+    def remove(self, path):
+        return bool(_bridge.fsRemove(path))
+
+    # environment
+    def cwd(self):
+        return _bridge.fsCwd()
+
+    def home(self):
+        return _bridge.fsHome()
+
+    def user(self):
+        return _bridge.fsUser()
+
+    # settings
+    def settings(self):
+        import json
+        return json.loads(_bridge.getSettings())
+
+    def set_setting(self, key, value):
+        _bridge.setSetting(key, value)
+
+    def list_wallpapers(self):
+        return list(_bridge.listWallpapers())
+
+    def set_wallpaper(self, index):
+        _bridge.setWallpaper(int(index))
+
+    # apps
+    def list_apps(self):
+        return list(_bridge.listApps())
+
+    def open_app(self, app_id, path=None):
+        if path:
+            _bridge.openAppWithPath(app_id, path)
+        else:
+            _bridge.openApp(app_id, "")
+
+    # system
+    def toast(self, msg):
+        _bridge.toast(str(msg))
+
+    def confirm(self, msg):
+        return bool(_bridge.confirm(str(msg)))
+
+    def resolution(self):
+        return _bridge.resolution()
+
+    def storage_backend(self):
+        return _bridge.storageBackend()
+
+    def cores(self):
+        return _bridge.cores()
+
+    def uptime_seconds(self):
+        return _bridge.uptimeSeconds()
+
+    def python_version(self):
+        return _bridge.pythonVersion()
+
+    def reset_boot_all(self):
+        _bridge.resetBootAll()
+
+
+nyx = _Nyx()
+
+_nyx_apps = []
+
+
+def _nyx_exec(src, app_id):
+    ns = {
+        "__name__": "__main__",
+        "nyx": nyx,
+        "_bridge": _bridge,
+        "js": js,
+        "create_proxy": create_proxy,
+        "to_js": to_js,
+        "_mkprops": _mkprops,
+        "Widget": Widget,
+        "Container": Container,
+        "Terminal": Terminal,
+        "App": App,
+        "__app_id__": app_id,
+    }
+    _nyx_apps.append(ns)
+    try:
+        exec(src, ns)
+    except Exception:
+        import traceback
+        tb = traceback.format_exc()
+        wid = _bridge.currentWindow()
+        for line in tb.split("\n"):
+            _bridge.appPrint(wid, line, "err")

@@ -1,0 +1,83 @@
+def main(app):
+    app.title("Files")
+    app.size(760, 500)
+
+    state = {"cwd": nyx.home(), "history": [], "hIdx": -1}
+
+    # ---- callbacks defined first ----
+    def render():
+        path_lbl.text = state["cwd"]
+        listing.clear()
+        try:
+            names = sorted(nyx.list(state["cwd"]))
+        except Exception:
+            names = []
+        if not names:
+            listing.label("this folder is empty", align="center", cls="nx-dim")
+            return
+        for n in names:
+            full = (state["cwd"] + "/" + n).replace("//", "/")
+            icon = ">" if nyx.is_dir(full) else "-"
+            b = listing.button(icon + "  " + n,
+                               (lambda nm=n: open_item(nm)),
+                               cls="nx-flat")
+            b.set_style("text-align", "left")
+            b.set_style("font-size", "12px")
+            b.set_style("padding", "8px 10px")
+
+    def set_cwd(p, push=True):
+        state["cwd"] = p
+        if push:
+            state["history"] = state["history"][:state["hIdx"] + 1]
+            state["history"].append(p)
+            state["hIdx"] = len(state["history"]) - 1
+        render()
+
+    def go_back():
+        if state["hIdx"] > 0:
+            state["hIdx"] -= 1
+            state["cwd"] = state["history"][state["hIdx"]]
+            render()
+
+    def go_up():
+        p = state["cwd"]
+        if p == "/":
+            return
+        parts = p.split("/")[1:]
+        parts.pop()
+        set_cwd("/" + "/".join(parts))
+
+    def go_home():
+        set_cwd(nyx.home())
+
+    def go_root():
+        set_cwd("/")
+
+    def open_item(name):
+        full = (state["cwd"] + "/" + name).replace("//", "/")
+        if nyx.is_dir(full):
+            set_cwd(full)
+        else:
+            nyx.open_app("editor", full)
+
+    # ---- build UI ----
+    nav = app.row()
+    nav.set_style("padding", "0")
+    nav.set_style("flex", "0 0 auto")
+    nav.button("back", go_back, cls="nx-flat")
+    nav.button("up", go_up, cls="nx-flat")
+    nav.button("home", go_home, cls="nx-flat")
+    nav.button("root", go_root, cls="nx-flat")
+
+    path_lbl = app.label("", cls="nx-dim")
+
+    listing = app.grid(cols=4, cls="nx-grid")
+    listing.set_style("align-content", "start")
+
+    set_cwd(nyx.home(), push=False)
+    state["history"] = [state["cwd"]]
+    state["hIdx"] = 0
+    render()
+
+
+nyx.run(main)

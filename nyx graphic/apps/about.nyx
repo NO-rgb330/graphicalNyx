@@ -1,0 +1,39 @@
+def main(app):
+    app.title("About Graphical NyxOS Version 0.1.02")
+    app.size(460, 440)
+
+    app.spacer(6)
+    app.label("nyx", align="center", size="huge")
+    app.label("ver 0.1.02-monochrome", align="center", cls="nx-dim")
+    app.spacer(10)
+
+    app.label(
+        "A simple graphical desktop environment.",
+        align="center"
+    )
+    app.spacer(8)
+
+    chips = app.row()
+    chips.set_style("justify-content", "center")
+    chips.label("Hack font", align="center", cls="nx-dim")
+    chips.label("Python apps", align="center", cls="nx-dim")
+    chips.label("No frameworks", align="center", cls="nx-dim")
+
+    app.spacer(14)
+    app.label("Runtime", cls="nx-bold")
+
+    info = [
+        ("Uptime", str(nyx.uptime_seconds()) + "s"),
+        ("Viewport", nyx.resolution()),
+        ("Storage", nyx.storage_backend()),
+        ("Python", nyx.python_version()),
+        ("Apps loaded", str(len(nyx.list_apps()))),
+    ]
+    for k, v in info:
+        row = app.row()
+        row.set_style("padding", "0")
+        row.label(k, cls="nx-dim")
+        row.label(v, align="right", cls="nx-bold")
+
+
+nyx.run(main)

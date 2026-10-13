@@ -1,0 +1,190 @@
+def main(app, opts=None):
+    if opts is None:
+        opts = {}
+
+    state = {
+        "path": None,
+        "ext": ".txt",
+        "last_action": "",
+    }
+
+    # ---------- helpers (callbacks defined before UI is built) ----------
+
+    def refresh_ui():
+        if state["path"]:
+            name = state["path"].split("/")[-1]
+            app.title("Editor - " + name)
+            path_lbl.text = state["path"]
+        else:
+            app.title("Editor - untitled")
+            path_lbl.text = "(unsaved - press 'save as')"
+        text = area.value or ""
+        lines = text.count("\n") + 1 if text else 1
+        msg = str(lines) + " lines  -  " + str(len(text)) + " chars"
+        if state["last_action"]:
+            msg += "  |  " + state["last_action"]
+        status.text = msg
+
+    def write_file(path, content):
+        if path.startswith("/system"):
+            nyx.toast("cannot write to /system")
+            return False
+        try:
+            ok = bool(_bridge.fsWrite(path, str(content)))
+        except Exception as e:
+            nyx.toast("write error: " + str(e))
+            return False
+        if not ok:
+            nyx.toast("failed to write " + path)
+            return False
+        return True
+
+    def show_panel(prefill=""):
+        name_input.value = prefill
+        ext_select.value = state["ext"]
+        panel.set_style("display", "flex")
+        name_input.focus()
+
+    def hide_panel():
+        panel.set_style("display", "none")
+
+    def on_ext_change(value):
+        state["ext"] = value
+
+    def do_save_as():
+        raw = (name_input.value or "").strip()
+        if not raw:
+            nyx.toast("enter a filename")
+            return
+        # strip any extension the user typed so we don't double up
+        base = raw
+        for e in (".txt", ".nyx"):
+            if base.lower().endswith(e):
+                base = base[:-len(e)]
+                break
+        base = base.replace("/", "_").replace("\\", "_").strip()
+        if not base:
+            nyx.toast("invalid filename")
+            return
+        folder = nyx.home() + "/documents"
+        if not nyx.exists(folder):
+            nyx.mkdir(folder)
+        target = folder + "/" + base + state["ext"]
+        if write_file(target, area.value or ""):
+            state["path"] = target
+            state["last_action"] = "saved"
+            hide_panel()
+            refresh_ui()
+            nyx.toast("saved " + target)
+
+    def do_save():
+        """Save in place. If there is no path yet, open the save-as panel."""
+        if state["path"]:
+            if write_file(state["path"], area.value or ""):
+                state["last_action"] = "saved"
+                refresh_ui()
+                nyx.toast("saved " + state["path"])
+        else:
+            show_panel()
+
+    def load_file(full):
+        content = nyx.read(full)
+        if content is None:
+            nyx.toast("cannot read " + full)
+            return
+        area.value = content
+        state["path"] = full
+        name = full.split("/")[-1]
+        state["ext"] = ".nyx" if name.lower().endswith(".nyx") else ".txt"
+        state["last_action"] = "opened"
+        refresh_ui()
+        nyx.toast("opened " + full)
+
+    def on_new():
+        state["path"] = None
+        state["last_action"] = ""
+        area.value = ""
+        hide_panel()
+        refresh_ui()
+
+    def on_open():
+        # No file picker available - cycle through the files in ~/documents
+        folder = nyx.home() + "/documents"
+        if not nyx.exists(folder):
+            nyx.toast("no documents folder")
+            return
+        try:
+            entries = sorted(nyx.list(folder))
+        except Exception:
+            entries = []
+        files = [e for e in entries
+                 if e.lower().endswith(".txt") or e.lower().endswith(".nyx")]
+        if not files:
+            nyx.toast("no .txt or .nyx files in documents")
+            return
+        # If we already have a file open, pick the next one; otherwise the first
+        current = state["path"].split("/")[-1] if state["path"] else None
+        try:
+            idx = files.index(current) if current in files else -1
+            nxt = files[(idx + 1) % len(files)]
+        except Exception:
+            nxt = files[0]
+        load_file(folder + "/" + nxt)
+
+    def on_input(_):
+        refresh_ui()
+
+    # ---------- build the UI ----------
+
+    bar = app.row()
+    bar.set_style("padding", "4px 2px")
+    bar.button("new", on_new, cls="nx-flat")
+    bar.button("open", on_open, cls="nx-flat")
+    bar.button("save", do_save, cls="nx-flat")
+    bar.button("save as", show_panel, cls="nx-flat")
+
+    path_lbl = app.label("(unsaved - press 'save as')", cls="nx-dim")
+
+    area = app.textarea("")
+    area.on_input(on_input)
+
+    # save-as panel (hidden until needed)
+    panel = app.row()
+    panel.set_style("display", "none")
+    panel.set_style("padding", "6px 4px")
+    panel.set_style("gap", "4px")
+    panel.set_style("background", "var(--panel)")
+    panel.set_style("border-top", "1px solid var(--border)")
+
+    lbl1 = panel.label("filename:", cls="")
+    lbl1.set_style("flex", "0 0 auto")
+
+    name_input = panel.input(placeholder="untitled", value="")
+    name_input.set_style("flex", "2")
+    name_input.on_enter(lambda _v: do_save_as())
+
+    lbl2 = panel.label("ext:", cls="")
+    lbl2.set_style("flex", "0 0 auto")
+
+    ext_select = panel.select([".txt", ".nyx"], value=".txt",
+                              on_change=on_ext_change)
+    ext_select.set_style("flex", "0 0 auto")
+
+    btn_ok = panel.button("save", do_save_as, cls="nx-primary")
+    btn_ok.set_style("flex", "0 0 auto")
+
+    btn_cancel = panel.button("cancel", hide_panel, cls="nx-flat")
+    btn_cancel.set_style("flex", "0 0 auto")
+
+    status = app.label("", cls="nx-dim")
+
+    # ---------- initial state ----------
+    # If launched from Files (or anywhere with a path), open that file now.
+    initial_path = opts.get("path")
+    if initial_path:
+        load_file(initial_path)
+    else:
+        refresh_ui()
+
+
+nyx.run(main)

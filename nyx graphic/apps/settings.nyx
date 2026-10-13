@@ -1,0 +1,85 @@
+def main(app):
+    app.title("Settings")
+    app.size(600, 560)
+
+    s = nyx.settings()
+
+    app.label("Wallpaper", cls="nx-bold")
+    grid = app.grid(cols=4, cls="nx-wallgrid")
+
+    wall_defs = nyx.list_wallpapers()
+    selected = {"i": s.get("wallpaper", 0)}
+    wall_widgets = []
+
+    def pick(i):
+        selected["i"] = i
+        nyx.set_wallpaper(i)
+        for j, w in enumerate(wall_widgets):
+            w.wall_set_on(j == i)
+
+    for i, css in enumerate(wall_defs):
+        w = grid.wall(css=css, on=(i == selected["i"]))
+        w.wall_on_click((lambda idx=i: pick(idx)))
+        wall_widgets.append(w)
+
+    app.spacer(10)
+    app.label("Appearance", cls="nx-bold")
+
+    toggle = app.row()
+    toggle.set_style("padding", "0")
+    toggle.label("light theme", cls="")
+    sw = toggle.switch(on=(s.get("theme") == "light"))
+
+    def toggle_theme():
+        cur = nyx.settings()
+        new_theme = "dark" if cur.get("theme") == "light" else "light"
+        nyx.set_setting("theme", new_theme)
+        sw.switch_set(new_theme == "light")
+
+    sw.on_click(toggle_theme)
+
+    app.spacer(6)
+    fsrow = app.row()
+    fsrow.set_style("padding", "0")
+    fsrow.label("font size", cls="")
+    fs_val = fsrow.label(str(s.get("font_scale", 13)) + "px",
+                         align="right", cls="nx-bold")
+
+    def bump_font(delta):
+        cur = nyx.settings()
+        v = max(11, min(18, cur.get("font_scale", 13) + delta))
+        nyx.set_setting("font_scale", v)
+        fs_val.text = str(v) + "px"
+
+    fsrow.button("-", lambda: bump_font(-1), cls="nx-flat")
+    fsrow.button("+", lambda: bump_font(1), cls="nx-flat")
+
+    app.spacer(10)
+    app.label("System", cls="nx-bold")
+
+    info = [
+        ("OS", "NyxOS 1.0-monochrome"),
+        ("Runtime", "Pyodide / Python"),
+        ("Storage", nyx.storage_backend()),
+        ("Resolution", nyx.resolution()),
+        ("User", nyx.user()),
+        ("Cores", str(nyx.cores())),
+    ]
+    for k, v in info:
+        row = app.row()
+        row.set_style("padding", "0")
+        row.label(k, cls="nx-dim")
+        row.label(v, align="right", cls="nx-bold")
+
+    app.spacer(10)
+    app.label("Danger zone", cls="nx-bold")
+    wipe = app.button("wipe all storage", cls="")
+
+    def do_wipe():
+        if nyx.confirm("wipe all storage and return to setup?"):
+            nyx.reset_boot_all()
+
+    wipe.on_click(do_wipe)
+
+
+nyx.run(main)
